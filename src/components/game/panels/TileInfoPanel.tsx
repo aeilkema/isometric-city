@@ -1,15 +1,15 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import { Tile, BuildingType, TOOL_INFO, Tool } from '@/types/game';
+import { Tile, TOOL_INFO } from '@/types/game';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { CloseIcon } from '@/components/ui/Icons';
 import { useGame } from '@/context/GameContext';
-import { 
-  SERVICE_CONFIG, 
+import {
+  SERVICE_CONFIG,
   SERVICE_BUILDING_TYPES,
   SERVICE_MAX_LEVEL,
   SERVICE_RANGE_INCREASE_PER_LEVEL,
@@ -30,40 +30,36 @@ interface TileInfoPanelProps {
   isMobile?: boolean;
 }
 
-export function TileInfoPanel({ 
-  tile, 
-  services, 
+export function TileInfoPanel({
+  tile,
+  services,
   onClose,
   isMobile = false
 }: TileInfoPanelProps) {
   const { x, y } = tile;
   const { state, upgradeServiceBuilding } = useGame();
-  
-  // Check if this is a service building
+
   const isServiceBuilding = SERVICE_BUILDING_TYPES.has(tile.building.type);
-  
-  // Calculate upgrade cost and info for service buildings
+
   const upgradeInfo = useMemo(() => {
     if (!isServiceBuilding) return null;
-    
+
     const buildingType = tile.building.type;
-    // Service buildings are also Tools, so we can safely cast
     const baseCost = (TOOL_INFO as Record<string, { cost: number }>)[buildingType]?.cost ?? 0;
     const currentLevel = tile.building.level;
-    
+
     if (currentLevel >= SERVICE_MAX_LEVEL) return null;
-    
+
     const upgradeCost = baseCost * Math.pow(SERVICE_UPGRADE_COST_BASE, currentLevel);
     const canAfford = state.stats.money >= upgradeCost;
     const isUnderConstruction = tile.building.constructionProgress !== undefined && tile.building.constructionProgress < 100;
     const isAbandoned = tile.building.abandoned;
-    
-    // Get base range and calculate effective range
+
     const config = SERVICE_CONFIG[buildingType as keyof typeof SERVICE_CONFIG];
     const baseRange = config?.range ?? 0;
     const currentEffectiveRange = Math.floor(baseRange * (1 + (currentLevel - 1) * SERVICE_RANGE_INCREASE_PER_LEVEL));
     const nextEffectiveRange = Math.floor(baseRange * (1 + currentLevel * SERVICE_RANGE_INCREASE_PER_LEVEL));
-    
+
     return {
       cost: upgradeCost,
       canAfford,
@@ -76,50 +72,57 @@ export function TileInfoPanel({
       nextEffectiveRange,
     };
   }, [isServiceBuilding, tile.building, state.stats.money]);
-  
+
   const handleUpgrade = (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
     if (!upgradeInfo || !upgradeInfo.canAfford) return;
-    const success = upgradeServiceBuilding(x, y);
-    if (success) {
-      // Optionally add notification here
-    }
+    upgradeServiceBuilding(x, y);
   };
-  
+
   const handleCardClick = (e: React.MouseEvent) => {
     e.stopPropagation();
   };
-  
+
   return (
-    <Card 
-      className={`${isMobile ? 'fixed left-0 right-0 w-full rounded-none border-x-0 border-t border-b z-30' : 'absolute top-4 right-4 w-72 z-50'}`} 
+    <Card
+      className={`${
+        isMobile
+          ? 'fixed left-0 right-0 w-full rounded-none border-x-0 border-t border-b z-[80]'
+          : 'absolute top-4 left-4 w-72 z-[60] max-h-[42vh] overflow-hidden shadow-2xl'
+      }`}
       style={isMobile ? { top: 'calc(72px + env(safe-area-inset-top, 0px))' } : undefined}
       onClick={handleCardClick}
     >
-      <CardHeader className="pb-2 flex flex-row items-center justify-between">
-        <CardTitle className="text-sm font-sans">Tile ({x}, {y})</CardTitle>
+      <CardHeader className="pb-2 flex flex-row items-center justify-between shrink-0">
+        <div>
+          <div className="text-[9px] uppercase tracking-[0.16em] text-muted-foreground mb-0.5">Tile inspector</div>
+          <CardTitle className="text-sm font-sans">Tile ({x}, {y})</CardTitle>
+        </div>
         <Button variant="ghost" size="icon-sm" onClick={onClose}>
           <CloseIcon size={14} />
         </Button>
       </CardHeader>
-      
-      <CardContent className="space-y-3 text-sm">
+
+      <CardContent className={`${isMobile ? 'space-y-3 text-sm' : 'space-y-3 text-sm overflow-y-auto max-h-[calc(42vh-62px)] pr-3'}`}>
         <div className="flex justify-between">
           <span className="text-muted-foreground">Building</span>
           <span className="capitalize">{tile.building.type.replace(/_/g, ' ')}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">Zone</span>
-          <Badge variant={
-            tile.zone === 'residential' ? 'default' :
-            tile.zone === 'commercial' ? 'secondary' :
-            tile.zone === 'industrial' ? 'outline' : 'secondary'
-          } className={
-            tile.zone === 'residential' ? 'bg-green-500/20 text-green-400' :
-            tile.zone === 'commercial' ? 'bg-blue-500/20 text-blue-400' :
-            tile.zone === 'industrial' ? 'bg-amber-500/20 text-amber-400' : ''
-          }>
+          <Badge
+            variant={
+              tile.zone === 'residential' ? 'default' :
+              tile.zone === 'commercial' ? 'secondary' :
+              tile.zone === 'industrial' ? 'outline' : 'secondary'
+            }
+            className={
+              tile.zone === 'residential' ? 'bg-green-500/20 text-green-400' :
+              tile.zone === 'commercial' ? 'bg-blue-500/20 text-blue-400' :
+              tile.zone === 'industrial' ? 'bg-amber-500/20 text-amber-400' : ''
+            }
+          >
             {tile.zone === 'none' ? 'Unzoned' : tile.zone}
           </Badge>
         </div>
@@ -135,9 +138,9 @@ export function TileInfoPanel({
           <span className="text-muted-foreground">Jobs</span>
           <span>{tile.building.jobs}</span>
         </div>
-        
+
         <Separator />
-        
+
         <div className="flex justify-between">
           <span className="text-muted-foreground">Power</span>
           <Badge variant={tile.building.powered ? 'default' : 'destructive'}>
@@ -146,7 +149,10 @@ export function TileInfoPanel({
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">Water</span>
-          <Badge variant={tile.building.watered ? 'default' : 'destructive'} className={tile.building.watered ? 'bg-cyan-500/20 text-cyan-400' : ''}>
+          <Badge
+            variant={tile.building.watered ? 'default' : 'destructive'}
+            className={tile.building.watered ? 'bg-cyan-500/20 text-cyan-400' : ''}
+          >
             {tile.building.watered ? 'Connected' : 'No Water'}
           </Badge>
         </div>
@@ -160,7 +166,7 @@ export function TileInfoPanel({
             {Math.round(tile.pollution)}%
           </span>
         </div>
-        
+
         {tile.building.onFire && (
           <>
             <Separator />
@@ -170,10 +176,10 @@ export function TileInfoPanel({
             </div>
           </>
         )}
-        
+
         <Separator />
         <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">Service Coverage</div>
-        
+
         <div className="grid grid-cols-2 gap-2 text-xs">
           <div className="flex justify-between">
             <span className="text-muted-foreground">Police</span>
@@ -192,7 +198,7 @@ export function TileInfoPanel({
             <span>{Math.round(services.education[y][x])}%</span>
           </div>
         </div>
-        
+
         {upgradeInfo && (
           <>
             <Separator />
@@ -220,19 +226,13 @@ export function TileInfoPanel({
                 Upgrade to Level {upgradeInfo.currentLevel + 1}
               </Button>
               {!upgradeInfo.canAfford && (
-                <p className="text-xs text-muted-foreground text-center">
-                  Insufficient funds
-                </p>
+                <p className="text-xs text-muted-foreground text-center">Insufficient funds</p>
               )}
               {upgradeInfo.isUnderConstruction && (
-                <p className="text-xs text-muted-foreground text-center">
-                  Building under construction
-                </p>
+                <p className="text-xs text-muted-foreground text-center">Building under construction</p>
               )}
               {upgradeInfo.isAbandoned && (
-                <p className="text-xs text-muted-foreground text-center">
-                  Building is abandoned
-                </p>
+                <p className="text-xs text-muted-foreground text-center">Building is abandoned</p>
               )}
             </div>
           </>

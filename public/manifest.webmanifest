@@ -1,0 +1,32 @@
+{
+  "name": "IsoCity — Metropolis Builder",
+  "short_name": "IsoCity",
+  "description": "Detailed isometric city builder with offline play and AutoMode.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f1219",
+  "theme_color": "#0f1219",
+  "categories": ["games", "simulation"],
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Open IsoCity",
+      "short_name": "Play",
+      "url": "/"
+    },
+    {
+      "name": "Open IsoCoaster",
+      "short_name": "Coaster",
+      "url": "/coaster"
+    }
+  ]
+}

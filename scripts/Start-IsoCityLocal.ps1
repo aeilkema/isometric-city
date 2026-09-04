@@ -35,31 +35,44 @@ function Stop-ExistingIsoCityServer([int]$PortNumber) {
         $ownerPid = $connection.OwningProcess
         if (-not $ownerPid) { continue }
 
-        try {
-            $process = Get-CimInstance Win32_Process -Filter "ProcessId = $ownerPid" -ErrorAction Stop
-            $commandLine = [string]$process.CommandLine
-            if ($commandLine -match 'next' -or $commandLine -match 'isometric-city' -or $commandLine -match 'npm') {
-                Write-Host "Bestaande IsoCity/Next server op poort $PortNumber stoppen (PID $ownerPid)..." -ForegroundColor DarkGray
-                Stop-Process -Id $ownerPid -Force -ErrorAction SilentlyContinue
-                Start-Sleep -Milliseconds 500
-            }
-            else {
-                throw "Poort $PortNumber is al in gebruik door PID $ownerPid. Stop dit proces of kies een andere poort met -Port."
-            }
+        $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $ownerPid" -ErrorAction SilentlyContinue
+        $commandLine = if ($processInfo) { [string]$processInfo.CommandLine } else { '' }
+
+        if ($commandLine -match 'next' -or $commandLine -match 'isometric-city' -or $commandLine -match 'npm') {
+            Write-Host "Bestaande IsoCity/Next server op poort $PortNumber stoppen (PID $ownerPid)..." -ForegroundColor DarkGray
+            Stop-Process -Id $ownerPid -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 600
         }
-        catch {
-            if ($_.Exception.Message -like 'Poort *') { throw }
+        else {
+            throw "Poort $PortNumber is al in gebruik door PID $ownerPid. Stop dit proces of kies een andere poort met -Port."
         }
+    }
+}
+
+function Show-ServerLogs([string]$StdOutPath, [string]$StdErrPath) {
+    if (Test-Path $StdOutPath) {
+        Write-Host "`n--- IsoCity server output ---" -ForegroundColor Yellow
+        Get-Content $StdOutPath -Tail 80 -ErrorAction SilentlyContinue
+    }
+    if (Test-Path $StdErrPath) {
+        Write-Host "`n--- IsoCity server errors ---" -ForegroundColor Yellow
+        Get-Content $StdErrPath -Tail 80 -ErrorAction SilentlyContinue
     }
 }
 
 Assert-Command 'node' 'Installeer Node.js 22 LTS en start dit script opnieuw.'
 Assert-Command 'npm' 'Installeer Node.js 22 LTS en start dit script opnieuw.'
+Assert-Command 'git' 'Installeer Git for Windows en start dit script opnieuw.'
 
+$nodeCommand = Get-Command node -ErrorAction Stop
+$nodeExe = $nodeCommand.Source
 $nodeMajor = [int]((node --version).TrimStart('v').Split('.')[0])
 if ($nodeMajor -lt 22) {
     Write-Warning "Node.js $nodeMajor gedetecteerd. IsoCity wordt getest met Node.js 22 of nieuwer."
 }
+
+$commit = (git rev-parse --short HEAD 2>$null).Trim()
+Write-Host "IsoCity Git-versie: $commit" -ForegroundColor Green
 
 Stop-ExistingIsoCityServer -PortNumber $Port
 
@@ -71,14 +84,13 @@ if (-not $SkipInstall) {
     }
 }
 
-if ($Development) {
-    Write-Host "IsoCity development server starten op http://127.0.0.1:$Port ..." -ForegroundColor Cyan
-    $process = Start-Process -FilePath 'npm.cmd' -ArgumentList @('run', 'dev', '--', '-p', $Port) -WorkingDirectory $repoRoot -PassThru -WindowStyle Minimized
+$nextCli = Join-Path $repoRoot 'node_modules\next\dist\bin\next'
+if (-not (Test-Path $nextCli)) {
+    throw "Next.js CLI niet gevonden op $nextCli. Verwijder node_modules en voer npm ci uit."
 }
-else {
+
+if (-not $Development) {
     if (-not $SkipBuild) {
-        # Always rebuild in production mode. A .next directory can belong to an
-        # older Git revision; reusing it made `git pull` appear to have no effect.
         $nextDir = Join-Path $repoRoot '.next'
         if (Test-Path $nextDir) {
             Write-Host 'Oude production build verwijderen...' -ForegroundColor DarkGray
@@ -92,38 +104,81 @@ else {
     elseif (-not (Test-Path (Join-Path $repoRoot '.next'))) {
         throw '-SkipBuild is gebruikt, maar er bestaat nog geen .next production build.'
     }
-
-    Write-Host "IsoCity production server starten op http://127.0.0.1:$Port ..." -ForegroundColor Cyan
-    $process = Start-Process -FilePath 'npm.cmd' -ArgumentList @('run', 'start', '--', '-p', $Port) -WorkingDirectory $repoRoot -PassThru -WindowStyle Minimized
 }
 
+$logDir = Join-Path $repoRoot '.isocity-local'
+New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+$stdoutLog = Join-Path $logDir 'server.stdout.log'
+$stderrLog = Join-Path $logDir 'server.stderr.log'
+Remove-Item $stdoutLog, $stderrLog -Force -ErrorAction SilentlyContinue
+
+$mode = if ($Development) { 'dev' } else { 'start' }
+Write-Host "IsoCity $mode server starten op http://127.0.0.1:$Port ..." -ForegroundColor Cyan
+
+# Start node.exe directly instead of npm.cmd. On some Windows installations the
+# npm wrapper process can exit while its child Next process disappears with it.
+# A direct Node process is stable and gives us a real PID plus persistent logs.
+$arguments = @(
+    $nextCli,
+    $mode,
+    '-H', '127.0.0.1',
+    '-p', "$Port"
+)
+
+$process = Start-Process \
+    -FilePath $nodeExe \
+    -ArgumentList $arguments \
+    -WorkingDirectory $repoRoot \
+    -RedirectStandardOutput $stdoutLog \
+    -RedirectStandardError $stderrLog \
+    -PassThru \
+    -WindowStyle Hidden
+
 $url = "http://127.0.0.1:$Port"
-$deadline = (Get-Date).AddSeconds(45)
+$deadline = (Get-Date).AddSeconds(60)
+$ready = $false
+
 while ((Get-Date) -lt $deadline) {
+    $process.Refresh()
     if ($process.HasExited) {
-        throw "IsoCity server is onverwacht gestopt met exitcode $($process.ExitCode)."
+        Show-ServerLogs -StdOutPath $stdoutLog -StdErrPath $stderrLog
+        throw "IsoCity server is gestopt met exitcode $($process.ExitCode)."
     }
-    if (Test-HttpReady $url) { break }
+
+    if (Test-HttpReady $url) {
+        $ready = $true
+        break
+    }
+
     Start-Sleep -Milliseconds 400
 }
 
-if (-not (Test-HttpReady $url)) {
+if (-not $ready) {
+    Show-ServerLogs -StdOutPath $stdoutLog -StdErrPath $stderrLog
     Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-    throw "IsoCity werd niet bereikbaar op $url."
+    throw "IsoCity werd niet bereikbaar op $url binnen 60 seconden."
 }
 
-$commit = ''
-try { $commit = (git rev-parse --short HEAD 2>$null).Trim() } catch { }
+$listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $listener) {
+    Show-ServerLogs -StdOutPath $stdoutLog -StdErrPath $stderrLog
+    throw "De HTTP-check slaagde, maar er is geen LISTEN socket meer op poort $Port."
+}
 
-Write-Host "IsoCity draait lokaal. PID: $($process.Id)" -ForegroundColor Green
-Write-Host "URL: $url" -ForegroundColor Green
-if ($commit) { Write-Host "Git-versie: $commit" -ForegroundColor Green }
-Write-Host 'De browserversie is een installeerbare PWA en werkt na caching ook offline.' -ForegroundColor DarkGray
+Write-Host ''
+Write-Host 'ISOcity LOCAL IS ACTIEF' -ForegroundColor Green
+Write-Host "URL:         $url" -ForegroundColor Green
+Write-Host "Git-versie: $commit" -ForegroundColor Green
+Write-Host "Node PID:    $($process.Id)" -ForegroundColor Green
+Write-Host "Listen PID:  $($listener.OwningProcess)" -ForegroundColor Green
+Write-Host "Log output:  $stdoutLog" -ForegroundColor DarkGray
+Write-Host "Log errors:  $stderrLog" -ForegroundColor DarkGray
 
 if (-not $NoBrowser) {
-    # Query parameter forces a fresh navigation while remaining harmless to Next.js.
-    $launchUrl = if ($commit) { "$url/?build=$commit" } else { "$url/?fresh=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())" }
+    $launchUrl = "$url/?build=$commit&local=1"
     Start-Process $launchUrl
 }
 
-Write-Host "Stoppen: Stop-Process -Id $($process.Id)" -ForegroundColor DarkGray
+Write-Host ''
+Write-Host "Controle: Get-NetTCPConnection -LocalPort $Port -State Listen" -ForegroundColor DarkGray
+Write-Host "Stoppen:  Stop-Process -Id $($listener.OwningProcess)" -ForegroundColor DarkGray

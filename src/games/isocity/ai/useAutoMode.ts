@@ -22,6 +22,7 @@ const EXECUTABLE_TOOLS: Partial<Record<PlannedCityAction['kind'], Tool>> = {
   'build-water': 'water_tower',
   'build-transit': 'rail_station',
   'build-green-space': 'park',
+  'improve-road': 'road',
 };
 
 function clamp01(value: number): number {
@@ -181,9 +182,10 @@ export function useAutoMode(): AutoModeStatus {
           }
         }
 
-        if (nearbyRoads === 0 && current.stats.population > 20) continue;
+        if (nearbyRoads === 0 && current.stats.population > 20 && tool !== 'road') continue;
         const distance = Math.hypot(x - center, y - center) / Math.max(1, current.gridSize);
-        const score = nearbyRoads * 15 + nearbyDevelopment * 2 - distance * 12;
+        const roadScore = tool === 'road' && nearbyRoads === 0 ? 8 : nearbyRoads * 15;
+        const score = roadScore + nearbyDevelopment * 2 - distance * 12;
         if (!best || score > best.score) best = { x, y, score };
       }
     }
@@ -215,12 +217,38 @@ export function useAutoMode(): AutoModeStatus {
     return true;
   }, [expandCity, findPlacement, latestStateRef, placeAtTile, setTool]);
 
+  const makeBootstrapAction = useCallback((): PlannedCityAction | null => {
+    const current = latestStateRef.current;
+    let roadCount = 0;
+    for (const row of current.grid) {
+      for (const tile of row) {
+        if (tile.building.type === 'road' || (tile.building.type === 'bridge' && tile.building.bridgeTrackType !== 'rail')) {
+          roadCount += 1;
+        }
+      }
+    }
+
+    if (roadCount > 0) return null;
+    return {
+      id: `autopilot-${current.tick}-bootstrap-road`,
+      kind: 'improve-road',
+      score: 100,
+      estimatedCost: TOOL_INFO.road.cost,
+      reason: 'De stad heeft nog geen wegennet. AutoMode legt eerst een centrale ontsluiting aan voordat er wordt gezoneerd.',
+      tags: ['bootstrap', 'mobility'],
+      constraints: ['Gebruik de normale bouwkosten en plaatsingsregels.'],
+    };
+  }, [latestStateRef]);
+
   const runNow = useCallback(() => {
     if (runningRef.current) return;
     runningRef.current = true;
     try {
       const nextPlan = autopilot.plan(buildSnapshot());
+      const bootstrap = makeBootstrapAction();
+      if (bootstrap) nextPlan.actions = [bootstrap, ...nextPlan.actions];
       setPlan(nextPlan);
+
       const executable = nextPlan.actions.find((action) => execute(action));
       if (executable) {
         setLastAction(executable);
@@ -230,7 +258,7 @@ export function useAutoMode(): AutoModeStatus {
     } finally {
       runningRef.current = false;
     }
-  }, [addNotification, autopilot, buildSnapshot, execute]);
+  }, [addNotification, autopilot, buildSnapshot, execute, makeBootstrapAction]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -242,8 +270,10 @@ export function useAutoMode(): AutoModeStatus {
 
   useEffect(() => {
     const nextPlan = autopilot.plan(buildSnapshot());
+    const bootstrap = makeBootstrapAction();
+    if (bootstrap) nextPlan.actions = [bootstrap, ...nextPlan.actions];
     setPlan(nextPlan);
-  }, [autopilot, buildSnapshot, state.stats.money, state.stats.population, state.stats.jobs, state.stats.happiness]);
+  }, [autopilot, buildSnapshot, makeBootstrapAction, state.stats.money, state.stats.population, state.stats.jobs, state.stats.happiness]);
 
   return { enabled, strategy, plan, lastAction, lastActionAt, setEnabled, setStrategy, runNow };
 }

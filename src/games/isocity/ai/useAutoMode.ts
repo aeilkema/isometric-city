@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useGame } from '@/context/GameContext';
 import { TOOL_INFO, Tool } from '@/types/game';
 import { CityAutopilot } from './CityAutopilot';
-import { AutopilotPlan, AutopilotStrategy, CityPlanningSnapshot, PlannedCityAction } from './types';
+import { countPlanningEntities, createPlanningSnapshot } from './planningMetrics';
+import { AutopilotPlan, AutopilotStrategy, PlannedCityAction } from './types';
 
 const ENABLED_KEY = 'isocity-automode-enabled';
 const STRATEGY_KEY = 'isocity-automode-strategy';
@@ -25,16 +26,19 @@ const EXECUTABLE_TOOLS: Partial<Record<PlannedCityAction['kind'], Tool>> = {
   'improve-road': 'road',
 };
 
-function clamp01(value: number): number {
-  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
-}
+const STRATEGIES: AutopilotStrategy[] = [
+  'conservative',
+  'balanced',
+  'transit-first',
+  'green-city',
+  'growth',
+  'dutch-urbanism',
+];
 
 function readStrategy(): AutopilotStrategy {
   if (typeof window === 'undefined') return 'balanced';
   const value = localStorage.getItem(STRATEGY_KEY) as AutopilotStrategy | null;
-  return value && ['conservative', 'balanced', 'transit-first', 'green-city', 'growth', 'dutch-urbanism'].includes(value)
-    ? value
-    : 'balanced';
+  return value && STRATEGIES.includes(value) ? value : 'balanced';
 }
 
 export interface AutoModeStatus {
@@ -75,81 +79,28 @@ export function useAutoMode(): AutoModeStatus {
     if (typeof window !== 'undefined') localStorage.setItem(STRATEGY_KEY, value);
   }, []);
 
-  const buildSnapshot = useCallback((): CityPlanningSnapshot => {
+  const buildPlan = useCallback((): AutopilotPlan => {
     const current = latestStateRef.current;
-    let developed = 0;
-    let zoned = 0;
-    let poweredBuildings = 0;
-    let wateredBuildings = 0;
-    let buildingsNeedingUtilities = 0;
-    let trafficSum = 0;
-    let pollutedSum = 0;
-    let crimeSum = 0;
-    let landValueSum = 0;
-    let severeTraffic = 0;
-    let parkTiles = 0;
+    const nextPlan = autopilot.plan(createPlanningSnapshot(current, strategy));
+    const counts = countPlanningEntities(current);
 
-    for (const row of current.grid) {
-      for (const tile of row) {
-        const type = tile.building.type;
-        if (type !== 'grass' && type !== 'empty' && type !== 'water') developed += 1;
-        if (tile.zone !== 'none') zoned += 1;
-        if (type === 'park' || type === 'park_large' || type === 'tree') parkTiles += 1;
-        if (!['grass', 'empty', 'water', 'road', 'rail', 'bridge', 'tree'].includes(type)) {
-          buildingsNeedingUtilities += 1;
-          if (tile.building.powered) poweredBuildings += 1;
-          if (tile.building.watered) wateredBuildings += 1;
-        }
-        trafficSum += tile.traffic ?? 0;
-        pollutedSum += tile.pollution ?? 0;
-        crimeSum += tile.crime ?? 0;
-        landValueSum += tile.landValue ?? 0;
-        if ((tile.traffic ?? 0) >= 70) severeTraffic += 1;
-      }
+    if (counts.roads === 0) {
+      nextPlan.actions = [
+        {
+          id: `autopilot-${current.tick}-bootstrap-road`,
+          kind: 'improve-road',
+          score: 100,
+          estimatedCost: TOOL_INFO.road.cost,
+          reason: 'De stad heeft nog geen wegennet. AutoMode legt eerst een centrale ontsluiting aan voordat er wordt gezoneerd.',
+          tags: ['bootstrap', 'mobility'],
+          constraints: ['Gebruik de normale bouwkosten en plaatsingsregels.'],
+        },
+        ...nextPlan.actions,
+      ];
     }
 
-    const tileCount = Math.max(1, current.gridSize * current.gridSize);
-    const utilityNeed = Math.max(1, buildingsNeedingUtilities);
-    const powerCoverage = poweredBuildings / utilityNeed;
-    const waterCoverage = wateredBuildings / utilityNeed;
-    const population = current.stats.population;
-    const jobs = current.stats.jobs;
-    const unemployment = population > 0 ? Math.max(0, population - jobs) / population : 0;
-    const averageTraffic = clamp01(trafficSum / tileCount / 100);
-
-    return {
-      tick: current.tick,
-      year: current.year,
-      month: current.month,
-      metrics: {
-        money: current.stats.money,
-        monthlyIncome: current.stats.income,
-        monthlyExpenses: current.stats.expenses,
-        population,
-        jobs,
-        unemploymentRate: clamp01(unemployment),
-        housingOccupancy: clamp01(0.62 + current.stats.demand.residential / 250),
-        residentialDemand: clamp01((current.stats.demand.residential + 100) / 200),
-        commercialDemand: clamp01((current.stats.demand.commercial + 100) / 200),
-        industrialDemand: clamp01((current.stats.demand.industrial + 100) / 200),
-        averageTraffic,
-        severeCongestionShare: severeTraffic / tileCount,
-        transitShare: clamp01(0.08 + zoned / tileCount * 0.12),
-        bicycleShare: strategy === 'dutch-urbanism' ? 0.18 : 0.08,
-        averagePollution: clamp01(pollutedSum / tileCount / 100),
-        averageCrime: clamp01(crimeSum / tileCount / 100),
-        averageLandValue: clamp01(landValueSum / tileCount / 100),
-        powerUtilization: powerCoverage < 0.98 ? 1 : clamp01(0.55 + developed / tileCount * 0.5),
-        waterUtilization: waterCoverage < 0.98 ? 1 : clamp01(0.5 + developed / tileCount * 0.5),
-        schoolUtilization: clamp01(0.45 + (100 - current.stats.education) / 120),
-        healthcareUtilization: clamp01(0.45 + (100 - current.stats.health) / 120),
-        fireRisk: clamp01(0.35 + (100 - current.stats.safety) / 130),
-        parkCoverage: clamp01(parkTiles / Math.max(1, developed + parkTiles) * 3),
-        wasteUtilization: clamp01(0.45 + developed / tileCount * 0.6),
-        developedLandShare: clamp01((developed + zoned) / tileCount),
-      },
-    };
-  }, [latestStateRef, strategy]);
+    return nextPlan;
+  }, [autopilot, latestStateRef, strategy]);
 
   const findPlacement = useCallback((tool: Tool): { x: number; y: number } | null => {
     const current = latestStateRef.current;
@@ -217,38 +168,12 @@ export function useAutoMode(): AutoModeStatus {
     return true;
   }, [expandCity, findPlacement, latestStateRef, placeAtTile, setTool]);
 
-  const makeBootstrapAction = useCallback((): PlannedCityAction | null => {
-    const current = latestStateRef.current;
-    let roadCount = 0;
-    for (const row of current.grid) {
-      for (const tile of row) {
-        if (tile.building.type === 'road' || (tile.building.type === 'bridge' && tile.building.bridgeTrackType !== 'rail')) {
-          roadCount += 1;
-        }
-      }
-    }
-
-    if (roadCount > 0) return null;
-    return {
-      id: `autopilot-${current.tick}-bootstrap-road`,
-      kind: 'improve-road',
-      score: 100,
-      estimatedCost: TOOL_INFO.road.cost,
-      reason: 'De stad heeft nog geen wegennet. AutoMode legt eerst een centrale ontsluiting aan voordat er wordt gezoneerd.',
-      tags: ['bootstrap', 'mobility'],
-      constraints: ['Gebruik de normale bouwkosten en plaatsingsregels.'],
-    };
-  }, [latestStateRef]);
-
   const runNow = useCallback(() => {
     if (runningRef.current) return;
     runningRef.current = true;
     try {
-      const nextPlan = autopilot.plan(buildSnapshot());
-      const bootstrap = makeBootstrapAction();
-      if (bootstrap) nextPlan.actions = [bootstrap, ...nextPlan.actions];
+      const nextPlan = buildPlan();
       setPlan(nextPlan);
-
       const executable = nextPlan.actions.find((action) => execute(action));
       if (executable) {
         setLastAction(executable);
@@ -258,7 +183,7 @@ export function useAutoMode(): AutoModeStatus {
     } finally {
       runningRef.current = false;
     }
-  }, [addNotification, autopilot, buildSnapshot, execute, makeBootstrapAction]);
+  }, [addNotification, buildPlan, execute]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -269,11 +194,8 @@ export function useAutoMode(): AutoModeStatus {
   }, [enabled, latestStateRef, runNow]);
 
   useEffect(() => {
-    const nextPlan = autopilot.plan(buildSnapshot());
-    const bootstrap = makeBootstrapAction();
-    if (bootstrap) nextPlan.actions = [bootstrap, ...nextPlan.actions];
-    setPlan(nextPlan);
-  }, [autopilot, buildSnapshot, makeBootstrapAction, state.stats.money, state.stats.population, state.stats.jobs, state.stats.happiness]);
+    setPlan(buildPlan());
+  }, [buildPlan, state.stats.money, state.stats.population, state.stats.jobs, state.stats.happiness]);
 
   return { enabled, strategy, plan, lastAction, lastActionAt, setEnabled, setStrategy, runNow };
 }

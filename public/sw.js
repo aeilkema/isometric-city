@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'isocity-v2';
+const CACHE_VERSION = 'isocity-v3';
 const APP_SHELL = [
   '/',
   '/manifest.webmanifest',
@@ -30,8 +30,6 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  // Documents are network-first so deployments update immediately, with the
-  // cached shell as fallback when the user is offline.
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
@@ -48,8 +46,6 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Heavy immutable assets are cache-first. Other same-origin resources use
-  // stale-while-revalidate to keep interaction fast without pinning old code.
   const isHeavyAsset = url.pathname.startsWith('/assets/') || /\.(?:webp|png|jpg|jpeg|avif|woff2?)$/i.test(url.pathname);
   if (isHeavyAsset) {
     event.respondWith(

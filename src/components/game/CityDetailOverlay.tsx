@@ -22,17 +22,50 @@ function hash2d(x: number, y: number, salt = 0): number {
 }
 
 function isRoad(grid: ReturnType<typeof useGame>['state']['grid'], x: number, y: number): boolean {
-  const type = grid[y]?.[x]?.building.type;
-  return type === 'road' || (type === 'bridge' && grid[y]?.[x]?.building.bridgeTrackType !== 'rail');
+  const tile = grid[y]?.[x];
+  const type = tile?.building.type;
+  return type === 'road' || (type === 'bridge' && tile?.building.bridgeTrackType !== 'rail');
+}
+
+function isDeveloped(type: string): boolean {
+  return !['grass', 'empty', 'water', 'road', 'rail', 'bridge', 'tree'].includes(type);
+}
+
+function drawBike(ctx: CanvasRenderingContext2D, x: number, y: number, scale = 1) {
+  ctx.beginPath();
+  ctx.arc(x - 2 * scale, y, 1.7 * scale, 0, Math.PI * 2);
+  ctx.arc(x + 2 * scale, y, 1.7 * scale, 0, Math.PI * 2);
+  ctx.moveTo(x - 2 * scale, y);
+  ctx.lineTo(x, y - 2.8 * scale);
+  ctx.lineTo(x + 2 * scale, y);
+  ctx.moveTo(x, y - 2.8 * scale);
+  ctx.lineTo(x + 0.7 * scale, y - 4.3 * scale);
+  ctx.stroke();
+}
+
+function drawStreetTree(ctx: CanvasRenderingContext2D, x: number, y: number, size: number) {
+  ctx.strokeStyle = 'rgba(77, 56, 39, 0.95)';
+  ctx.lineWidth = Math.max(0.8, size * 0.12);
+  ctx.beginPath();
+  ctx.moveTo(x, y + size * 0.45);
+  ctx.lineTo(x, y - size * 0.25);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(59, 130, 78, 0.90)';
+  ctx.beginPath();
+  ctx.arc(x, y - size * 0.5, size * 0.42, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(91, 157, 88, 0.65)';
+  ctx.beginPath();
+  ctx.arc(x - size * 0.16, y - size * 0.68, size * 0.22, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 /**
- * Lightweight decorative canvas rendered above the main game canvas.
+ * Procedural high-detail layer rendered above the legacy sprite canvas.
  *
- * The layer deliberately stores no game state: street furniture is generated
- * deterministically from tile coordinates, so saves stay small and existing
- * cities immediately gain extra visual detail. It is viewport-culled and only
- * appears when zoomed in far enough to justify the extra drawing work.
+ * It adds a visibly more contemporary public realm without adding thousands of
+ * persistent entities to the save file. Everything is deterministic from tile
+ * coordinates, viewport-culled and therefore immediately applies to old cities.
  */
 export function CityDetailOverlay({ viewport, mobile = false }: CityDetailOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -44,8 +77,8 @@ export function CityDetailOverlay({ viewport, mobile = false }: CityDetailOverla
     if (!canvas) return;
 
     const { zoom, offset, canvasSize } = viewport;
-    const detailThreshold = mobile ? 1.15 : 0.82;
-    const dpr = Math.min(window.devicePixelRatio || 1, mobile ? 1.5 : 2);
+    const detailThreshold = mobile ? 0.92 : 0.58;
+    const dpr = Math.min(window.devicePixelRatio || 1, mobile ? 1.35 : 1.8);
     const width = Math.max(1, Math.floor(canvasSize.width * dpr));
     const height = Math.max(1, Math.floor(canvasSize.height * dpr));
 
@@ -75,105 +108,212 @@ export function CityDetailOverlay({ viewport, mobile = false }: CityDetailOverla
     ctx.scale(dpr * zoom, dpr * zoom);
     ctx.translate(offset.x / zoom, offset.y / zoom);
     ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
 
     let detailsDrawn = 0;
-    const detailLimit = mobile ? 180 : 700;
+    const detailLimit = mobile ? 320 : 1350;
 
     for (let y = bounds.minTileY; y <= bounds.maxTileY && detailsDrawn < detailLimit; y += 1) {
       for (let x = bounds.minTileX; x <= bounds.maxTileX && detailsDrawn < detailLimit; x += 1) {
         const tile = state.grid[y]?.[x];
         if (!tile) continue;
+
         const { screenX, screenY } = gridToScreen(x, y, 0, 0);
         const centerX = screenX + TILE_WIDTH / 2;
         const centerY = screenY + TILE_HEIGHT / 2;
+        const type = tile.building.type;
+        const seed = hash2d(x, y);
 
-        if (tile.building.type === 'road') {
-          const horizontal = isRoad(state.grid, x - 1, y) || isRoad(state.grid, x + 1, y);
-          const vertical = isRoad(state.grid, x, y - 1) || isRoad(state.grid, x, y + 1);
-          const seed = hash2d(x, y);
+        if (type === 'road') {
+          const west = isRoad(state.grid, x - 1, y);
+          const east = isRoad(state.grid, x + 1, y);
+          const north = isRoad(state.grid, x, y - 1);
+          const south = isRoad(state.grid, x, y + 1);
+          const horizontal = west || east;
+          const vertical = north || south;
+          const intersection = Number(west) + Number(east) + Number(north) + Number(south) >= 3;
 
-          // Street lamps: bright enough to make streets feel structured, but
-          // deliberately sparse so they do not compete with moving vehicles.
-          if (seed > 0.56) {
-            const side = seed > 0.78 ? 1 : -1;
-            const lampX = centerX + (horizontal && !vertical ? 0 : side * 18);
-            const lampY = centerY + (horizontal && !vertical ? side * 10 : 0);
-            ctx.strokeStyle = 'rgba(55, 65, 81, 0.88)';
-            ctx.lineWidth = 1.35;
-            ctx.beginPath();
-            ctx.moveTo(lampX, lampY + 3);
-            ctx.lineTo(lampX, lampY - 10);
-            ctx.stroke();
-            ctx.fillStyle = 'rgba(255, 236, 178, 0.92)';
-            ctx.beginPath();
-            ctx.arc(lampX, lampY - 11, 1.8, 0, Math.PI * 2);
-            ctx.fill();
-            detailsDrawn += 1;
+          // Crisp lane markings make the road network visibly less flat.
+          ctx.strokeStyle = 'rgba(245, 236, 190, 0.62)';
+          ctx.lineWidth = 1.05;
+          ctx.setLineDash([5, 5]);
+          ctx.beginPath();
+          if (horizontal && !vertical) {
+            ctx.moveTo(centerX - 20, centerY + 9);
+            ctx.lineTo(centerX + 20, centerY - 9);
+          } else if (vertical && !horizontal) {
+            ctx.moveTo(centerX - 20, centerY - 9);
+            ctx.lineTo(centerX + 20, centerY + 9);
+          } else if (!intersection) {
+            const choose = seed > 0.5;
+            ctx.moveTo(centerX - 17, centerY + (choose ? 8 : -8));
+            ctx.lineTo(centerX + 17, centerY + (choose ? -8 : 8));
           }
+          ctx.stroke();
+          ctx.setLineDash([]);
+          detailsDrawn += 1;
 
-          // Parked cars appear only on quieter-looking road tiles. They are
-          // intentionally tiny isometric props rather than simulated vehicles.
-          if (seed < 0.20 && (tile.traffic ?? 0) < 60) {
-            ctx.save();
-            ctx.translate(centerX + (vertical ? 15 : -10), centerY + (vertical ? 2 : 8));
-            ctx.rotate(horizontal && !vertical ? -0.43 : 0.43);
-            ctx.fillStyle = ['#64748b', '#a16207', '#475569', '#7f1d1d'][Math.floor(hash2d(x, y, 4) * 4) % 4];
-            ctx.fillRect(-4, -2, 8, 4);
-            ctx.fillStyle = 'rgba(191, 219, 254, 0.65)';
-            ctx.fillRect(-1.5, -1.5, 3, 3);
-            ctx.restore();
-            detailsDrawn += 1;
-          }
+          // Sidewalk edge / curb highlights.
+          ctx.strokeStyle = 'rgba(226, 232, 240, 0.28)';
+          ctx.lineWidth = 0.8;
+          ctx.beginPath();
+          ctx.moveTo(centerX - 27, centerY);
+          ctx.lineTo(centerX, centerY - 13);
+          ctx.lineTo(centerX + 27, centerY);
+          ctx.stroke();
 
-          // Bike racks around dense development: a small but recognisable
-          // detail, especially for the Dutch Urbanism AutoMode strategy.
-          if (seed > 0.88) {
-            ctx.strokeStyle = 'rgba(148, 163, 184, 0.82)';
-            ctx.lineWidth = 0.9;
-            for (let bike = 0; bike < 2; bike += 1) {
-              const bx = centerX - 14 + bike * 5;
-              const by = centerY + 11;
+          // Zebra crossing on busier intersections.
+          if (intersection && seed > 0.28) {
+            ctx.strokeStyle = 'rgba(248, 250, 252, 0.78)';
+            ctx.lineWidth = 1.6;
+            for (let stripe = -2; stripe <= 2; stripe += 1) {
               ctx.beginPath();
-              ctx.arc(bx - 1.5, by, 1.5, 0, Math.PI * 2);
-              ctx.arc(bx + 1.5, by, 1.5, 0, Math.PI * 2);
-              ctx.moveTo(bx - 1.5, by);
-              ctx.lineTo(bx, by - 2.5);
-              ctx.lineTo(bx + 1.5, by);
+              ctx.moveTo(centerX - 8 + stripe * 2.2, centerY - 7 + stripe * 1.1);
+              ctx.lineTo(centerX + 3 + stripe * 2.2, centerY - 1 + stripe * 1.1);
               ctx.stroke();
             }
             detailsDrawn += 1;
           }
+
+          // Dutch-style cycle priority strip on a deterministic subset of through streets.
+          if (!intersection && seed > 0.61 && seed < 0.79) {
+            ctx.strokeStyle = 'rgba(196, 58, 52, 0.72)';
+            ctx.lineWidth = 3.1;
+            ctx.beginPath();
+            if (horizontal && !vertical) {
+              ctx.moveTo(centerX - 20, centerY + 14);
+              ctx.lineTo(centerX + 20, centerY - 4);
+            } else {
+              ctx.moveTo(centerX - 20, centerY - 4);
+              ctx.lineTo(centerX + 20, centerY + 14);
+            }
+            ctx.stroke();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.82)';
+            ctx.lineWidth = 0.85;
+            drawBike(ctx, centerX + 8, centerY + 6, 0.75);
+            detailsDrawn += 2;
+          }
+
+          // Street lamps on most developed streets.
+          if (seed > 0.34) {
+            const side = seed > 0.67 ? 1 : -1;
+            const lampX = centerX + (horizontal && !vertical ? side * 12 : side * 19);
+            const lampY = centerY + (horizontal && !vertical ? side * 10 : 1);
+            ctx.strokeStyle = 'rgba(51, 65, 85, 0.92)';
+            ctx.lineWidth = 1.25;
+            ctx.beginPath();
+            ctx.moveTo(lampX, lampY + 4);
+            ctx.lineTo(lampX, lampY - 10);
+            ctx.lineTo(lampX + side * 3, lampY - 11.5);
+            ctx.stroke();
+            ctx.fillStyle = 'rgba(255, 238, 175, 0.96)';
+            ctx.beginPath();
+            ctx.arc(lampX + side * 3.3, lampY - 11.5, 1.7, 0, Math.PI * 2);
+            ctx.fill();
+            detailsDrawn += 1;
+          }
+
+          // Street trees create continuous green avenues.
+          if (seed > 0.18 && seed < 0.46) {
+            const side = hash2d(x, y, 2) > 0.5 ? 1 : -1;
+            drawStreetTree(ctx, centerX + side * 24, centerY + side * 4, 7.5);
+            detailsDrawn += 1;
+          }
+
+          // Parked cars on quieter streets.
+          if (seed < 0.24 && (tile.traffic ?? 0) < 65) {
+            ctx.save();
+            ctx.translate(centerX + (vertical ? 15 : -10), centerY + (vertical ? 2 : 9));
+            ctx.rotate(horizontal && !vertical ? -0.43 : 0.43);
+            ctx.fillStyle = ['#64748b', '#a16207', '#475569', '#7f1d1d', '#155e75'][Math.floor(hash2d(x, y, 4) * 5) % 5];
+            ctx.fillRect(-4.4, -2, 8.8, 4);
+            ctx.fillStyle = 'rgba(191, 219, 254, 0.72)';
+            ctx.fillRect(-1.6, -1.5, 3.2, 3);
+            ctx.restore();
+            detailsDrawn += 1;
+          }
+
+          // Bus stop pole + shelter glass.
+          if (seed > 0.91 && !intersection) {
+            const bx = centerX - 22;
+            const by = centerY + 8;
+            ctx.strokeStyle = 'rgba(30, 41, 59, 0.95)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(bx, by + 4);
+            ctx.lineTo(bx, by - 9);
+            ctx.stroke();
+            ctx.fillStyle = 'rgba(34, 211, 238, 0.9)';
+            ctx.fillRect(bx - 2.4, by - 11, 4.8, 4.8);
+            ctx.fillStyle = 'rgba(186, 230, 253, 0.24)';
+            ctx.fillRect(bx + 4, by - 7, 11, 9);
+            ctx.strokeStyle = 'rgba(148, 163, 184, 0.65)';
+            ctx.strokeRect(bx + 4, by - 7, 11, 9);
+            detailsDrawn += 1;
+          }
+
+          // Small bicycle racks near denser streets.
+          if (seed > 0.82 && seed < 0.91) {
+            ctx.strokeStyle = 'rgba(148, 163, 184, 0.88)';
+            ctx.lineWidth = 0.8;
+            drawBike(ctx, centerX - 15, centerY + 11, 0.78);
+            drawBike(ctx, centerX - 9, centerY + 12, 0.78);
+            detailsDrawn += 2;
+          }
         }
 
-        if ((tile.building.type === 'park' || tile.building.type === 'park_large') && hash2d(x, y, 8) > 0.35) {
-          // Benches / picnic furniture make parks less visually empty without
-          // needing another sprite atlas.
-          ctx.fillStyle = 'rgba(112, 78, 49, 0.92)';
-          ctx.fillRect(centerX - 7, centerY + 5, 13, 2.5);
-          ctx.strokeStyle = 'rgba(64, 48, 36, 0.9)';
+        if ((type === 'park' || type === 'park_large' || type === 'community_garden' || type === 'pond_park') && seed > 0.22) {
+          // Benches and picnic furniture.
+          ctx.fillStyle = 'rgba(112, 78, 49, 0.94)';
+          ctx.fillRect(centerX - 8, centerY + 5, 14, 2.5);
+          ctx.strokeStyle = 'rgba(64, 48, 36, 0.92)';
           ctx.lineWidth = 1;
           ctx.beginPath();
-          ctx.moveTo(centerX - 5, centerY + 7);
-          ctx.lineTo(centerX - 5, centerY + 10);
+          ctx.moveTo(centerX - 6, centerY + 7);
+          ctx.lineTo(centerX - 6, centerY + 10);
           ctx.moveTo(centerX + 4, centerY + 7);
           ctx.lineTo(centerX + 4, centerY + 10);
           ctx.stroke();
-          detailsDrawn += 1;
+          if (hash2d(x, y, 14) > 0.48) drawStreetTree(ctx, centerX + 14, centerY - 2, 8.5);
+          detailsDrawn += 2;
         }
 
-        if (zoom >= 1.25 && !['grass', 'empty', 'water', 'road', 'rail', 'bridge', 'tree'].includes(tile.building.type)) {
-          // Rooftop solar hint on a deterministic subset of completed modern
-          // buildings. This is purely decorative and therefore save-compatible.
-          if (tile.building.constructionProgress >= 100 && hash2d(x, y, 12) > 0.78) {
+        // Forecourts and small public-space details around completed buildings.
+        if (isDeveloped(type) && tile.building.constructionProgress >= 100) {
+          if (seed > 0.58 && seed < 0.78) {
+            ctx.fillStyle = 'rgba(226, 232, 240, 0.18)';
+            ctx.beginPath();
+            ctx.ellipse(centerX, centerY + 14, 13, 4, 0, 0, Math.PI * 2);
+            ctx.fill();
+            detailsDrawn += 1;
+          }
+
+          if (zoom >= 0.9 && hash2d(x, y, 12) > 0.67) {
+            // Rooftop solar panel cluster.
             ctx.save();
-            ctx.translate(centerX + 2, centerY - 21);
+            ctx.translate(centerX + 1, centerY - 21);
             ctx.rotate(-0.43);
-            ctx.fillStyle = 'rgba(30, 58, 85, 0.8)';
-            ctx.fillRect(-5, -2.5, 10, 5);
-            ctx.strokeStyle = 'rgba(147, 197, 253, 0.55)';
-            ctx.lineWidth = 0.6;
-            ctx.strokeRect(-5, -2.5, 10, 5);
+            ctx.fillStyle = 'rgba(27, 55, 83, 0.86)';
+            ctx.fillRect(-6, -3, 12, 6);
+            ctx.strokeStyle = 'rgba(147, 197, 253, 0.72)';
+            ctx.lineWidth = 0.55;
+            ctx.strokeRect(-6, -3, 12, 6);
+            ctx.beginPath();
+            ctx.moveTo(-2, -3);
+            ctx.lineTo(-2, 3);
+            ctx.moveTo(2, -3);
+            ctx.lineTo(2, 3);
+            ctx.stroke();
             ctx.restore();
+            detailsDrawn += 1;
+          }
+
+          if (zoom >= 1.05 && hash2d(x, y, 19) > 0.78) {
+            // HVAC/green-roof utility cluster for more believable rooftops.
+            ctx.fillStyle = 'rgba(100, 116, 139, 0.72)';
+            ctx.fillRect(centerX - 10, centerY - 16, 5, 4);
+            ctx.fillStyle = 'rgba(67, 114, 75, 0.7)';
+            ctx.fillRect(centerX + 6, centerY - 17, 7, 4);
             detailsDrawn += 1;
           }
         }

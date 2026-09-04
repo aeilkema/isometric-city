@@ -35,6 +35,7 @@ import { TopBar, StatsPanel } from '@/components/game/TopBar';
 import { CanvasIsometricGrid } from '@/components/game/CanvasIsometricGrid';
 import { AutoModeControl } from '@/components/game/AutoModeControl';
 import { CityDetailOverlay } from '@/components/game/CityDetailOverlay';
+import { NextGenerationHub } from '@/components/game/NextGenerationHub';
 
 const CARGO_TYPE_NAMES = [msg('containers'), msg('bulk materials'), msg('oil')];
 
@@ -216,6 +217,7 @@ export default function Game({ onExit }: { onExit?: () => void }) {
             />
             <CityDetailOverlay viewport={viewport} mobile />
             <AutoModeControl compact />
+            <NextGenerationHub selectedTile={selectedTile} compact />
 
             {isMultiplayer && (
               <div className="absolute top-2 right-2 z-20">
@@ -285,6 +287,7 @@ export default function Game({ onExit }: { onExit?: () => void }) {
             <OverlayModeToggle overlayMode={overlayMode} setOverlayMode={setOverlayMode} />
             <MiniMap onNavigate={(x, y) => setNavigationTarget({ x, y })} viewport={viewport} />
             <AutoModeControl />
+            <NextGenerationHub selectedTile={selectedTile} />
 
             {isMultiplayer && (
               <div className="absolute top-4 right-4 z-20">

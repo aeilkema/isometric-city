@@ -118,21 +118,17 @@ Write-Host "IsoCity $mode server starten op http://127.0.0.1:$Port ..." -Foregro
 # Start node.exe directly instead of npm.cmd. On some Windows installations the
 # npm wrapper process can exit while its child Next process disappears with it.
 # A direct Node process is stable and gives us a real PID plus persistent logs.
-$arguments = @(
-    $nextCli,
-    $mode,
-    '-H', '127.0.0.1',
-    '-p', "$Port"
-)
-
-$process = Start-Process \
-    -FilePath $nodeExe \
-    -ArgumentList $arguments \
-    -WorkingDirectory $repoRoot \
-    -RedirectStandardOutput $stdoutLog \
-    -RedirectStandardError $stderrLog \
-    -PassThru \
-    -WindowStyle Hidden
+$arguments = @($nextCli, $mode, '-H', '127.0.0.1', '-p', "$Port")
+$startParams = @{
+    FilePath = $nodeExe
+    ArgumentList = $arguments
+    WorkingDirectory = $repoRoot
+    RedirectStandardOutput = $stdoutLog
+    RedirectStandardError = $stderrLog
+    PassThru = $true
+    WindowStyle = 'Hidden'
+}
+$process = Start-Process @startParams
 
 $url = "http://127.0.0.1:$Port"
 $deadline = (Get-Date).AddSeconds(60)
@@ -166,7 +162,7 @@ if (-not $listener) {
 }
 
 Write-Host ''
-Write-Host 'ISOcity LOCAL IS ACTIEF' -ForegroundColor Green
+Write-Host 'ISOCITY LOCAL IS ACTIEF' -ForegroundColor Green
 Write-Host "URL:         $url" -ForegroundColor Green
 Write-Host "Git-versie: $commit" -ForegroundColor Green
 Write-Host "Node PID:    $($process.Id)" -ForegroundColor Green

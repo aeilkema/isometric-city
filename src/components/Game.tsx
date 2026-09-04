@@ -35,6 +35,7 @@ import {
 import { MiniMap } from '@/components/game/MiniMap';
 import { TopBar, StatsPanel } from '@/components/game/TopBar';
 import { CanvasIsometricGrid } from '@/components/game/CanvasIsometricGrid';
+import { AutoModeControl } from '@/components/game/AutoModeControl';
 
 // Cargo type names for notifications
 const CARGO_TYPE_NAMES = [msg('containers'), msg('bulk materials'), msg('oil')];
@@ -176,8 +177,6 @@ export default function Game({ onExit }: { onExit?: () => void }) {
         setTool('bulldoze');
       } else if (e.key === 'p' || e.key === 'P') {
         e.preventDefault();
-        // Toggle pause/unpause: if paused (speed 0), resume to normal (speed 1)
-        // If running, pause (speed 0)
         setSpeed(state.speed === 0 ? 1 : 0);
       }
     };
@@ -212,11 +211,10 @@ export default function Game({ onExit }: { onExit?: () => void }) {
         break;
 
       case 'vinnie':
-        // Vinnie dialog is handled by VinnieDialog component
         clearTriggeredCheat();
         break;
     }
-  }, [triggeredCheat, addMoney, addNotification, clearTriggeredCheat]);
+  }, [triggeredCheat, addMoney, addNotification, clearTriggeredCheat, gt]);
   
   // Track barge deliveries to show occasional notifications
   const bargeDeliveryCountRef = useRef(0);
@@ -242,7 +240,6 @@ export default function Game({ onExit }: { onExit?: () => void }) {
     return (
       <TooltipProvider>
         <div className="w-full h-full overflow-hidden bg-background flex flex-col">
-          {/* Mobile Top Bar */}
           <MobileTopBar 
             selectedTile={selectedTile && state.selectedTool === 'select' ? state.grid[selectedTile.y][selectedTile.x] : null}
             services={state.services}
@@ -251,7 +248,6 @@ export default function Game({ onExit }: { onExit?: () => void }) {
             onExit={onExit}
           />
           
-          {/* Share Modal for mobile co-op */}
           {multiplayer && (
             <ShareModal
               open={showShareModal}
@@ -259,7 +255,6 @@ export default function Game({ onExit }: { onExit?: () => void }) {
             />
           )}
           
-          {/* Main canvas area - fills remaining space, with padding for top/bottom bars */}
           <div className="flex-1 relative overflow-hidden" style={{ paddingTop: '72px', paddingBottom: '76px' }}>
             <CanvasIsometricGrid 
               overlayMode={overlayMode} 
@@ -268,8 +263,8 @@ export default function Game({ onExit }: { onExit?: () => void }) {
               isMobile={true}
               onBargeDelivery={handleBargeDelivery}
             />
+            <AutoModeControl compact />
             
-            {/* Multiplayer Players Indicator - Mobile */}
             {isMultiplayer && (
               <div className="absolute top-2 right-2 z-20">
                 <div className="bg-slate-900/90 border border-slate-700 rounded-lg px-2 py-1.5 shadow-lg">
@@ -306,14 +301,12 @@ export default function Game({ onExit }: { onExit?: () => void }) {
             )}
           </div>
           
-          {/* Mobile Bottom Toolbar */}
           <MobileToolbar 
             onOpenPanel={(panel) => setActivePanel(panel)}
             overlayMode={overlayMode}
             setOverlayMode={setOverlayMode}
           />
           
-          {/* Panels - render as fullscreen modals on mobile */}
           {state.activePanel === 'budget' && <BudgetPanel />}
           {state.activePanel === 'statistics' && <StatisticsPanel />}
           {state.activePanel === 'advisors' && <AdvisorsPanel />}
@@ -321,7 +314,6 @@ export default function Game({ onExit }: { onExit?: () => void }) {
           
           <VinnieDialog open={showVinnieDialog} onOpenChange={setShowVinnieDialog} />
           
-          {/* Tip Toast for helping new players */}
           <TipToast
             message={currentTip || ''}
             isVisible={isTipVisible}
@@ -354,8 +346,8 @@ export default function Game({ onExit }: { onExit?: () => void }) {
             />
             <OverlayModeToggle overlayMode={overlayMode} setOverlayMode={setOverlayMode} />
             <MiniMap onNavigate={(x, y) => setNavigationTarget({ x, y })} viewport={viewport} />
+            <AutoModeControl />
             
-            {/* Multiplayer Players Indicator */}
             {isMultiplayer && (
               <div className="absolute top-4 right-4 z-20">
                 <div className="bg-slate-900/90 border border-slate-700 rounded-lg px-3 py-2 shadow-lg min-w-[120px]">
@@ -401,7 +393,6 @@ export default function Game({ onExit }: { onExit?: () => void }) {
         <VinnieDialog open={showVinnieDialog} onOpenChange={setShowVinnieDialog} />
         <CommandMenu />
         
-        {/* Tip Toast for helping new players */}
         <TipToast
           message={currentTip || ''}
           isVisible={isTipVisible}

@@ -23,7 +23,7 @@ export function AutoModeControl({ compact = false }: { compact?: boolean }) {
 
   if (compact) {
     return (
-      <div className="absolute left-2 bottom-2 z-30 rounded-lg border border-border bg-background/95 shadow-xl backdrop-blur px-2 py-1.5 flex items-center gap-2">
+      <div className="absolute left-2 bottom-2 z-[80] rounded-lg border border-border bg-background/95 shadow-xl backdrop-blur px-2 py-1.5 flex items-center gap-2">
         <Bot className="w-4 h-4" />
         <span className="text-xs font-medium">Auto</span>
         <Switch checked={autoMode.enabled} onCheckedChange={autoMode.setEnabled} />
@@ -32,7 +32,7 @@ export function AutoModeControl({ compact = false }: { compact?: boolean }) {
   }
 
   return (
-    <div className="absolute left-4 bottom-4 z-30 w-[330px] rounded-xl border border-border bg-background/95 shadow-2xl backdrop-blur">
+    <div className="absolute left-4 bottom-4 z-[80] w-[330px] rounded-xl border border-border bg-background/95 shadow-2xl backdrop-blur">
       <div className="flex items-center gap-2 px-3 py-2.5">
         <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
           <Bot className="w-4 h-4 text-primary" />
@@ -57,7 +57,7 @@ export function AutoModeControl({ compact = false }: { compact?: boolean }) {
       </div>
 
       {expanded && (
-        <div className="border-t border-border px-3 py-3 space-y-3">
+        <div className="border-t border-border px-3 py-3 space-y-3 max-h-[52vh] overflow-y-auto">
           <div>
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">Strategy</div>
             <select

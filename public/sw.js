@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'isocity-v3';
+const CACHE_VERSION = 'isocity-v4';
 const APP_SHELL = [
   '/',
   '/manifest.webmanifest',
